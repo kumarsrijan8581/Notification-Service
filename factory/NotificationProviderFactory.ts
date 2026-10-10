@@ -9,9 +9,9 @@ export class NotificationProviderFactory {
     NotificationProvider
   >;
 
-  constructor() {
+  constructor(emailFailuresToSimulate = 0) {
     this.providers = {
-      EMAIL: new EmailProvider(),
+      EMAIL: new EmailProvider(emailFailuresToSimulate),
       SMS: new SMSProvider(),
     };
   }

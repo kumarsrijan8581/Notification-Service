@@ -1,8 +1,12 @@
+
 import { InMemoryQueue } from "./queue/InMemoryQueue";
 import { NotificationJob } from "./models/NotificationJob";
 import { NotificationService } from "./services/NotificationService";
 import { NotificationProviderFactory } from "./factory/NotificationProviderFactory";
 import { NotificationWorker } from "./workers/NotificationWorker";
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 async function main() {
   const queue = new InMemoryQueue<NotificationJob>();
@@ -10,13 +14,14 @@ async function main() {
   const notificationService =
     new NotificationService(queue);
 
-  const factory =
-    new NotificationProviderFactory();
+  // Simulate the first two email attempts failing.
+  const factory = new NotificationProviderFactory(2);
 
-  const worker =
-    new NotificationWorker(queue, factory);
+  const worker = new NotificationWorker(queue, factory);
 
-  // Producer: enqueue notifications
+  // Start consuming before adding jobs.
+  const workerPromise = worker.start();
+
   await notificationService.notify(
     "EMAIL",
     "user@example.com",
@@ -26,17 +31,16 @@ async function main() {
   await notificationService.notify(
     "SMS",
     "+911234567890",
-    "Your OTP is 123456"
+    "Your order has been confirmed!"
   );
 
-  console.log("All jobs have been enqueued.");
+  // Demo only: allow the initial attempts and retries to finish.
+  await sleep(3000);
 
-  // Worker: process queued jobs
-  while (await worker.processNext()) {
-    // Continue until the queue is empty.
-  }
+  worker.stop();
+  await workerPromise;
 
-  console.log("All queued jobs processed.");
+  console.log("Demo finished");
 }
 
 main().catch(console.error);
