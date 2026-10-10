@@ -3,6 +3,7 @@ import { DeadLetterQueue } from "./queue/DeadLetterQueue";
 import { NotificationJob } from "./models/NotificationJob";
 import { NotificationService } from "./services/NotificationService";
 import { JobStatusTracker } from "./services/JobStatusTracker";
+import { DeadLetterService } from "./services/DeadLetterService";
 import { NotificationProviderFactory } from "./factory/NotificationProviderFactory";
 import { NotificationWorker } from "./workers/NotificationWorker";
 
@@ -14,10 +15,15 @@ async function main() {
   const deadLetterQueue = new DeadLetterQueue();
   const tracker = new JobStatusTracker();
 
-  const service = new NotificationService(queue, tracker);
+  const notificationService = new NotificationService(queue, tracker);
+  const deadLetterService = new DeadLetterService(
+    deadLetterQueue,
+    queue,
+    tracker
+  );
 
-  // Five simulated failures; the job allows only four attempts.
-  const factory = new NotificationProviderFactory(5);
+  // Simulate four failed email attempts.
+  const factory = new NotificationProviderFactory(4);
 
   const worker = new NotificationWorker(
     queue,
@@ -28,27 +34,28 @@ async function main() {
 
   const workerPromise = worker.start();
 
-  const emailJobId = await service.notify(
+  const emailJobId = await notificationService.notify(
     "EMAIL",
     "mate@example.com",
     "Welcome to our platform!"
   );
 
-  const smsJobId = await service.notify(
-    "SMS",
-    "9876543210",
-    "Your OTP is 123456"
-  );
-
-  // Demo convenience, not a production completion mechanism.
   await sleep(5000);
 
-  console.log("\nFinal statuses:");
-  console.log(emailJobId, tracker.getStatus(emailJobId));
-  console.log(smsJobId, tracker.getStatus(smsJobId));
+  console.log("\n--- Before manual retry ---");
+  console.log("Status:", tracker.getStatus(emailJobId));
+  console.log("DLQ jobs:", deadLetterService.listFailedJobs());
 
-  console.log("\nDead-Letter Queue contents:");
-  console.dir(deadLetterQueue.getAll(), { depth: null });
+  const scheduled = await deadLetterService.retryJob(emailJobId);
+
+  if (scheduled) {
+    // Give the worker time to process the requeued job.
+    await sleep(1000);
+  }
+
+  console.log("\n--- After manual retry ---");
+  console.log("Status:", tracker.getStatus(emailJobId));
+  console.log("DLQ jobs:", deadLetterService.listFailedJobs());
 
   worker.stop();
   await workerPromise;
