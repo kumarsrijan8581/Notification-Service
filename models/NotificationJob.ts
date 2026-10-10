@@ -5,7 +5,8 @@ export type NotificationStatus =
   | "PROCESSING"
   | "RETRYING"
   | "COMPLETED"
-  | "FAILED";
+  | "FAILED"
+  | "DEAD_LETTER";
 
 export interface NotificationJob {
   id: string;

@@ -1,8 +1,9 @@
-
 import { Queue } from "../interfaces/Queue";
 import { NotificationJob } from "../models/NotificationJob";
 import { NotificationProviderFactory } from "../factory/NotificationProviderFactory";
 import { JobStatusTracker } from "../services/JobStatusTracker";
+import { DeadLetterQueue } from "../queue/DeadLetterQueue";
+import { NotificationStatus } from "../models/NotificationJob";
 
 export class NotificationWorker {
   private readonly abortController = new AbortController();
@@ -11,7 +12,8 @@ export class NotificationWorker {
   constructor(
     private queue: Queue<NotificationJob>,
     private factory: NotificationProviderFactory,
-    private tracker: JobStatusTracker
+    private tracker: JobStatusTracker,
+    private deadLetterQueue: DeadLetterQueue
   ) {}
 
   async start(): Promise<void> {
@@ -45,15 +47,23 @@ export class NotificationWorker {
     this.abortController.abort();
   }
 
+  private updateJobStatus(
+    job: NotificationJob,
+    status: NotificationStatus
+  ): void {
+    job.status = status;
+    this.tracker.updateStatus(job.id, status);
+  }
+  
   private async processJob(job: NotificationJob): Promise<void> {
-    this.tracker.updateStatus(job.id, "PROCESSING");
+    this.updateJobStatus(job, "PROCESSING");
   
     try {
       const provider = this.factory.getProvider(job.type);
   
       await provider.send(job.recipient, job.message);
   
-      this.tracker.updateStatus(job.id, "COMPLETED");
+      this.updateJobStatus(job, "COMPLETED");
   
       console.log(`Notification sent successfully: ${job.id}`);
     } catch (error) {
@@ -68,7 +78,7 @@ export class NotificationWorker {
       );
   
       if (job.attempts <= job.maxRetries) {
-        this.tracker.updateStatus(job.id, "RETRYING");
+        this.updateJobStatus(job, "RETRYING");
   
         const delayMs = 500 * 2 ** (job.attempts - 1);
   
@@ -76,9 +86,9 @@ export class NotificationWorker {
           void this.queue.enqueue(job);
         }, delayMs);
       } else {
-        this.tracker.updateStatus(job.id, "FAILED");
+        this.updateJobStatus(job, "DEAD_LETTER");
   
-        console.error(`Job permanently failed: ${job.id}`);
+        this.deadLetterQueue.add(job);
       }
     }
   }

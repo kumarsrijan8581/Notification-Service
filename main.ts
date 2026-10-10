@@ -1,4 +1,5 @@
 import { InMemoryQueue } from "./queue/InMemoryQueue";
+import { DeadLetterQueue } from "./queue/DeadLetterQueue";
 import { NotificationJob } from "./models/NotificationJob";
 import { NotificationService } from "./services/NotificationService";
 import { JobStatusTracker } from "./services/JobStatusTracker";
@@ -10,14 +11,20 @@ const sleep = (ms: number) =>
 
 async function main() {
   const queue = new InMemoryQueue<NotificationJob>();
+  const deadLetterQueue = new DeadLetterQueue();
   const tracker = new JobStatusTracker();
 
   const service = new NotificationService(queue, tracker);
 
-  // Simulate two initial email failures.
-  const factory = new NotificationProviderFactory(2);
+  // Five simulated failures; the job allows only four attempts.
+  const factory = new NotificationProviderFactory(5);
 
-  const worker = new NotificationWorker(queue, factory, tracker);
+  const worker = new NotificationWorker(
+    queue,
+    factory,
+    tracker,
+    deadLetterQueue
+  );
 
   const workerPromise = worker.start();
 
@@ -33,15 +40,15 @@ async function main() {
     "Your OTP is 123456"
   );
 
-  // Demo convenience: allow retries to finish.
-  await sleep(3000);
+  // Demo convenience, not a production completion mechanism.
+  await sleep(5000);
 
-  console.log("\nFinal job statuses:");
+  console.log("\nFinal statuses:");
   console.log(emailJobId, tracker.getStatus(emailJobId));
   console.log(smsJobId, tracker.getStatus(smsJobId));
 
-  console.log("\nAll tracked jobs:");
-  console.log(tracker.getAll());
+  console.log("\nDead-Letter Queue contents:");
+  console.dir(deadLetterQueue.getAll(), { depth: null });
 
   worker.stop();
   await workerPromise;
