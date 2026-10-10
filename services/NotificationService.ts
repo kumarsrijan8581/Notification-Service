@@ -1,16 +1,18 @@
 import { Queue } from "../interfaces/Queue";
 import { NotificationJob, NotificationType } from "../models/NotificationJob";
+import { JobStatusTracker } from "./JobStatusTracker";
 
 export class NotificationService {
   constructor(
-    private readonly queue: Queue<NotificationJob>
+    private queue: Queue<NotificationJob>,
+    private tracker: JobStatusTracker
   ) {}
 
   async notify(
     type: NotificationType,
     recipient: string,
     message: string
-  ): Promise<void> {
+  ): Promise<string> {
     const job: NotificationJob = {
       id: crypto.randomUUID(),
       type,
@@ -18,10 +20,15 @@ export class NotificationService {
       message,
       attempts: 0,
       maxRetries: 3,
+      status: "PENDING",
     };
+
+    this.tracker.register(job.id, "PENDING");
 
     await this.queue.enqueue(job);
 
-    console.log(`Job ${job.id} added to queue`);
+    console.log(`Notification job queued: ${job.id}`);
+
+    return job.id;
   }
 }

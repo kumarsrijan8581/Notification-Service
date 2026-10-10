@@ -1,5 +1,12 @@
 export type NotificationType = "EMAIL" | "SMS";
 
+export type NotificationStatus =
+  | "PENDING"
+  | "PROCESSING"
+  | "RETRYING"
+  | "COMPLETED"
+  | "FAILED";
+
 export interface NotificationJob {
   id: string;
   type: NotificationType;
@@ -7,4 +14,6 @@ export interface NotificationJob {
   message: string;
   attempts: number;
   maxRetries: number;
+  status: NotificationStatus;
+  lastError?: string;
 }

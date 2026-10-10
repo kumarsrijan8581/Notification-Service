@@ -2,14 +2,16 @@
 import { Queue } from "../interfaces/Queue";
 import { NotificationJob } from "../models/NotificationJob";
 import { NotificationProviderFactory } from "../factory/NotificationProviderFactory";
+import { JobStatusTracker } from "../services/JobStatusTracker";
 
 export class NotificationWorker {
   private readonly abortController = new AbortController();
   private running = false;
 
   constructor(
-    private readonly queue: Queue<NotificationJob>,
-    private readonly factory: NotificationProviderFactory
+    private queue: Queue<NotificationJob>,
+    private factory: NotificationProviderFactory,
+    private tracker: JobStatusTracker
   ) {}
 
   async start(): Promise<void> {
@@ -43,43 +45,40 @@ export class NotificationWorker {
     this.abortController.abort();
   }
 
-  private async processJob(
-    job: NotificationJob
-  ): Promise<void> {
+  private async processJob(job: NotificationJob): Promise<void> {
+    this.tracker.updateStatus(job.id, "PROCESSING");
+  
     try {
-      const provider =
-        this.factory.getProvider(job.type);
-
-      await provider.send(
-        job.recipient,
-        job.message
-      );
-
-      console.log(`Job ${job.id} completed`);
+      const provider = this.factory.getProvider(job.type);
+  
+      await provider.send(job.recipient, job.message);
+  
+      this.tracker.updateStatus(job.id, "COMPLETED");
+  
+      console.log(`Notification sent successfully: ${job.id}`);
     } catch (error) {
       job.attempts++;
-
+  
+      job.lastError =
+        error instanceof Error ? error.message : String(error);
+  
       console.error(
         `Job ${job.id} failed on attempt ${job.attempts}:`,
-        error
+        job.lastError
       );
-
+  
       if (job.attempts <= job.maxRetries) {
-        // Exponential backoff: 500ms, 1000ms, 2000ms...
-        const delayMs =
-          500 * 2 ** (job.attempts - 1);
-
-        console.log(
-          `Retrying job ${job.id} in ${delayMs}ms`
-        );
-
+        this.tracker.updateStatus(job.id, "RETRYING");
+  
+        const delayMs = 500 * 2 ** (job.attempts - 1);
+  
         setTimeout(() => {
           void this.queue.enqueue(job);
         }, delayMs);
       } else {
-        console.error(
-          `Job ${job.id} exhausted its retries`
-        );
+        this.tracker.updateStatus(job.id, "FAILED");
+  
+        console.error(`Job permanently failed: ${job.id}`);
       }
     }
   }
